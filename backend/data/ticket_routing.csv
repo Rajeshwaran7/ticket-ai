@@ -1,0 +1,5 @@
+category,keywords,examples,assigned_team
+billing,"payment invoice charge refund billing account subscription fee","I need help with my billing; My payment didn't go through; I want a refund; Invoice question",BillingTeam
+technical,"error bug issue problem technical support software hardware login access","The app is not working; I can't log in; There's a bug; Technical issue",TechSupport
+delivery,"shipping delivery order tracking package shipment arrive","Where is my order?; Delivery delayed; Tracking information; When will it arrive?",DeliveryTeam
+general,"inquiry question help information support","I have a question; Need information; General inquiry; Can you help?",GeneralSupport
