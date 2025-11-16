@@ -39,3 +39,7 @@ Thumbs.db
 # Uploads folder (user-generated content)
 backend/uploads/
 uploads/
+
+# Voice mail audio files
+backend/uploads/voicemail/
+uploads/voicemail/

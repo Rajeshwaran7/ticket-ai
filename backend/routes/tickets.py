@@ -17,6 +17,8 @@ from services.image_service import ImageService
 from services.ai_chat_service import AIChatService
 from services.agent_functions import AgentFunctions
 from services.audio_service import AudioService
+from services.tts_service import TTSService
+from services.email_service import EmailService
 from routes.auth import get_current_user, require_admin
 
 
@@ -26,6 +28,8 @@ image_service = ImageService()
 ai_chat_service = AIChatService()
 agent_functions = AgentFunctions()
 audio_service = AudioService()
+tts_service = TTSService()
+email_service = EmailService()
 
 
 class TicketCreate(BaseModel):
@@ -128,6 +132,34 @@ async def create_ticket(
     db.add(db_ticket)
     db.commit()
     db.refresh(db_ticket)
+    
+    # Generate voice mail and send email notification
+    try:
+        eta_str = db_ticket.expected_resolved_datetime.strftime("%Y-%m-%d %H:%M:%S") if db_ticket.expected_resolved_datetime else None
+        audio_file_path = tts_service.generate_ticket_created_voicemail(
+            ticket_id=db_ticket.id,
+            customer_name=ticket.customer,
+            category=category,
+            assigned_team=assigned_team,
+            eta=eta_str
+        )
+        
+        # Send email with voice mail attachment
+        if current_user.email:
+            email_service.send_ticket_created_email(
+                to_email=current_user.email,
+                ticket_id=db_ticket.id,
+                ticket_message=ticket.message,
+                category=category,
+                assigned_team=assigned_team,
+                customer_name=ticket.customer,
+                eta=eta_str,
+                audio_file_path=audio_file_path
+            )
+    except Exception as e:
+        print(f"⚠️  Failed to generate/send voice mail for ticket #{db_ticket.id}: {e}")
+        import traceback
+        traceback.print_exc()
 
     return TicketResponse(**db_ticket.to_dict())
 
@@ -197,6 +229,34 @@ async def create_ticket_with_screenshot(
     db.add(db_ticket)
     db.commit()
     db.refresh(db_ticket)
+    
+    # Generate voice mail and send email notification
+    try:
+        eta_str = db_ticket.expected_resolved_datetime.strftime("%Y-%m-%d %H:%M:%S") if db_ticket.expected_resolved_datetime else None
+        audio_file_path = tts_service.generate_ticket_created_voicemail(
+            ticket_id=db_ticket.id,
+            customer_name=customer,
+            category=category,
+            assigned_team=assigned_team,
+            eta=eta_str
+        )
+        
+        # Send email with voice mail attachment
+        if current_user.email:
+            email_service.send_ticket_created_email(
+                to_email=current_user.email,
+                ticket_id=db_ticket.id,
+                ticket_message=final_message,
+                category=category,
+                assigned_team=assigned_team,
+                customer_name=customer,
+                eta=eta_str,
+                audio_file_path=audio_file_path
+            )
+    except Exception as e:
+        print(f"⚠️  Failed to generate/send voice mail for ticket #{db_ticket.id}: {e}")
+        import traceback
+        traceback.print_exc()
 
     return TicketResponse(**db_ticket.to_dict())
 

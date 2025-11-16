@@ -17,10 +17,12 @@ except ImportError:
 from models.ticket import Ticket, SessionLocal
 from models.user import User
 from services.email_service import EmailService
+from services.tts_service import TTSService
 
 load_dotenv()
 
 email_service = EmailService()
+tts_service = TTSService()
 
 
 def update_ticket_statuses():
@@ -47,17 +49,28 @@ def update_ticket_statuses():
             db.commit()
             db.refresh(ticket)
             
-            # Send email notification
+            # Generate voice mail and send email notification
             if ticket.user_id:
                 user = db.query(User).filter(User.id == ticket.user_id).first()
                 if user and user.email:
+                    # Generate voice mail
+                    audio_file_path = tts_service.generate_ticket_status_voicemail(
+                        ticket_id=ticket.id,
+                        customer_name=ticket.customer,
+                        old_status=old_status,
+                        new_status="in_progress",
+                        ticket_message=ticket.message
+                    )
+                    
+                    # Send email with voice mail attachment
                     email_service.send_ticket_status_email(
                         to_email=user.email,
                         ticket_id=ticket.id,
                         ticket_message=ticket.message,
                         old_status=old_status,
                         new_status="in_progress",
-                        customer_name=ticket.customer
+                        customer_name=ticket.customer,
+                        audio_file_path=audio_file_path
                     )
             
             print(f"Updated ticket #{ticket.id} from {old_status} to in_progress")
@@ -75,17 +88,28 @@ def update_ticket_statuses():
             db.commit()
             db.refresh(ticket)
             
-            # Send email notification
+            # Generate voice mail and send email notification
             if ticket.user_id:
                 user = db.query(User).filter(User.id == ticket.user_id).first()
                 if user and user.email:
+                    # Generate voice mail
+                    audio_file_path = tts_service.generate_ticket_status_voicemail(
+                        ticket_id=ticket.id,
+                        customer_name=ticket.customer,
+                        old_status=old_status,
+                        new_status="resolved",
+                        ticket_message=ticket.message
+                    )
+                    
+                    # Send email with voice mail attachment
                     email_service.send_ticket_status_email(
                         to_email=user.email,
                         ticket_id=ticket.id,
                         ticket_message=ticket.message,
                         old_status=old_status,
                         new_status="resolved",
-                        customer_name=ticket.customer
+                        customer_name=ticket.customer,
+                        audio_file_path=audio_file_path
                     )
             
             print(f"Updated ticket #{ticket.id} from {old_status} to resolved")

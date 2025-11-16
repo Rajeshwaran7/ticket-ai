@@ -7,8 +7,12 @@ from sqlalchemy.orm import Session
 from models.ticket import Ticket
 from models.user import User
 from services.elsai_service import ElsAIService
+from services.tts_service import TTSService
+from services.email_service import EmailService
 
 elsai_service = ElsAIService()
+tts_service = TTSService()
+email_service = EmailService()
 
 
 class AgentFunctions:
@@ -310,6 +314,35 @@ class AgentFunctions:
         db.add(ticket)
         db.commit()
         db.refresh(ticket)
+        
+        # Generate voice mail and send email notification
+        try:
+            eta_str = ticket.expected_resolved_datetime.strftime("%Y-%m-%d %H:%M:%S") if ticket.expected_resolved_datetime else None
+            audio_file_path = tts_service.generate_ticket_created_voicemail(
+                ticket_id=ticket.id,
+                customer_name=customer_name,
+                category=ticket.category,
+                assigned_team=ticket.assigned_team,
+                eta=eta_str
+            )
+            
+            # Send email with voice mail attachment
+            user = db.query(User).filter(User.id == user_id).first()
+            if user and user.email:
+                email_service.send_ticket_created_email(
+                    to_email=user.email,
+                    ticket_id=ticket.id,
+                    ticket_message=ticket_message,
+                    category=ticket.category,
+                    assigned_team=ticket.assigned_team,
+                    customer_name=customer_name,
+                    eta=eta_str,
+                    audio_file_path=audio_file_path
+                )
+        except Exception as e:
+            print(f"⚠️  Failed to generate/send voice mail for ticket #{ticket.id}: {e}")
+            import traceback
+            traceback.print_exc()
         
         return {
             "success": True,
