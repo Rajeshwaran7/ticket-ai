@@ -16,6 +16,7 @@ from services.elsai_service import ElsAIService
 from services.image_service import ImageService
 from services.ai_chat_service import AIChatService
 from services.agent_functions import AgentFunctions
+from services.audio_service import AudioService
 from routes.auth import get_current_user, require_admin
 
 
@@ -24,6 +25,7 @@ elsai_service = ElsAIService()
 image_service = ImageService()
 ai_chat_service = AIChatService()
 agent_functions = AgentFunctions()
+audio_service = AudioService()
 
 
 class TicketCreate(BaseModel):
@@ -369,6 +371,7 @@ class ChatMessageHistoryResponse(BaseModel):
     session_id: int
     role: str
     content: str
+    audio_file_path: Optional[str] = None
     created_at: str
 
 
@@ -928,6 +931,115 @@ async def ai_agent_chat(
         action_performed=action_type,
         action_details=action_details
     )
+
+
+@router.post("/ai-agent/audio/upload")
+async def upload_audio_file(
+    audio: UploadFile = File(...),
+    session_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Upload audio file, convert to text, and process as chat message.
+    
+    Args:
+        audio: Audio file (MP3 preferred)
+        session_id: Optional chat session ID
+        db: Database session
+        current_user: Current authenticated user
+        
+    Returns:
+        Dictionary with transcribed text, audio file path, and session info
+    """
+    try:
+        # Validate file type
+        if not audio.content_type or not audio.content_type.startswith('audio/'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File must be an audio file"
+            )
+        
+        # Read audio file content
+        file_content = await audio.read()
+        
+        if len(file_content) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Audio file is empty"
+            )
+        
+        # Validate session if provided
+        if session_id:
+            session = db.query(ChatSession).filter(
+                ChatSession.id == session_id,
+                ChatSession.user_id == current_user.id
+            ).first()
+            if not session:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Chat session not found"
+                )
+        else:
+            # Create new session for audio message
+            session = ChatSession(
+                user_id=current_user.id,
+                title="Voice Message"
+            )
+            db.add(session)
+            db.flush()
+        
+        # Process audio: save and convert to text
+        result = audio_service.process_audio_upload(
+            file_content=file_content,
+            filename=audio.filename or "audio.mp3",
+            session_id=session.id
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result.get("error", "Failed to process audio")
+            )
+        
+        transcribed_text = result.get("text", "")
+        audio_file_path = result.get("audio_file_path")
+        stt_error = result.get("error")  # May contain STT error even if file saved
+        
+        # Save user message with audio file path
+        # Use transcribed text if available, otherwise use placeholder
+        message_content = transcribed_text if transcribed_text else "[Voice message - transcription unavailable. Please install ffmpeg for speech-to-text conversion.]"
+        
+        user_message = ChatMessage(
+            session_id=session.id,
+            role="user",
+            content=message_content,
+            audio_file_path=audio_file_path
+        )
+        db.add(user_message)
+        db.flush()
+        
+        # Update session
+        session.updated_at = datetime.utcnow()
+        db.commit()
+        
+        return {
+            "success": True,
+            "text": transcribed_text,
+            "audio_file_path": audio_file_path,
+            "session_id": session.id,
+            "message_id": user_message.id,
+            "error": stt_error if not transcribed_text else None,
+            "warning": stt_error if stt_error and transcribed_text else None  # Warning if STT had issues but file saved
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing audio: {str(e)}"
+        )
 
 
 @router.delete("/ai-agent/sessions/{session_id}")

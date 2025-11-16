@@ -36,3 +36,6 @@ Thumbs.db
 # Logs
 *.log
 
+# Uploads folder (user-generated content)
+backend/uploads/
+uploads/

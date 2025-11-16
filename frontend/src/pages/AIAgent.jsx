@@ -138,7 +138,8 @@ function AIAgent() {
   
   const messagesEndRef = useRef(null)
   const messagesContainerRef = useRef(null)
-  const recognitionRef = useRef(null)
+  const mediaRecorderRef = useRef(null)
+  const audioChunksRef = useRef([])
   const fileInputRef = useRef(null)
   const navigate = useNavigate()
   const user = getCurrentUser()
@@ -151,7 +152,6 @@ function AIAgent() {
     
     fetchPendingTickets()
     fetchChatSessions()
-    initializeSpeechRecognition()
     
     // Add welcome message only if no session is loaded
     if (!currentSessionId) {
@@ -221,33 +221,154 @@ function AIAgent() {
   }
 
   /**
-   * Initialize Web Speech API for voice input.
+   * Start recording audio as MP3.
    */
-  const initializeSpeechRecognition = () => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-      if (SpeechRecognition) {
-        recognitionRef.current = new SpeechRecognition()
-        recognitionRef.current.continuous = false
-        recognitionRef.current.interimResults = false
-        recognitionRef.current.lang = 'en-US'
-
-        recognitionRef.current.onresult = (event) => {
-          const transcript = event.results[0]?.[0]?.transcript
-          if (transcript) {
-            setInputMessage(transcript)
-          }
-          setIsRecording(false)
-        }
-
-        recognitionRef.current.onerror = () => {
-          setIsRecording(false)
-        }
-
-        recognitionRef.current.onend = () => {
-          setIsRecording(false)
+  const startAudioRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      audioChunksRef.current = []
+      
+      // Use MediaRecorder - will record as webm/opus, we'll convert to MP3 on server
+      // Or use audio/webm which is widely supported
+      const options = { mimeType: 'audio/webm;codecs=opus' }
+      if (MediaRecorder.isTypeSupported('audio/webm')) {
+        options.mimeType = 'audio/webm'
+      }
+      
+      mediaRecorderRef.current = new MediaRecorder(stream, options)
+      
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data)
         }
       }
+      
+      mediaRecorderRef.current.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop())
+        await handleAudioRecordingStop()
+      }
+      
+      mediaRecorderRef.current.start()
+      setIsRecording(true)
+    } catch (error) {
+      console.error('Error starting audio recording:', error)
+      alert('Failed to access microphone. Please check permissions.')
+      setIsRecording(false)
+    }
+  }
+
+  /**
+   * Stop recording and process audio.
+   */
+  const stopAudioRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+    }
+  }
+
+  /**
+   * Handle audio recording stop and upload.
+   */
+  const handleAudioRecordingStop = async () => {
+    if (audioChunksRef.current.length === 0) {
+      return
+    }
+
+    try {
+      setIsLoading(true)
+      setCurrentStatus('🎤 Processing audio...')
+      
+      // Create blob from audio chunks
+      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+      
+      // Create file object
+      const audioFile = new File([audioBlob], `voice_${Date.now()}.webm`, { type: 'audio/webm' })
+      
+      // Upload audio file
+      await uploadAudioFile(audioFile)
+      
+      audioChunksRef.current = []
+    } catch (error) {
+      console.error('Error processing audio:', error)
+      alert('Failed to process audio recording.')
+      setIsLoading(false)
+      setCurrentStatus(null)
+    }
+  }
+
+  /**
+   * Upload audio file and process as message.
+   */
+  const uploadAudioFile = async (audioFile) => {
+    try {
+      const token = getToken()
+      if (!token) {
+        navigate('/login')
+        return
+      }
+
+      setCurrentStatus('🎤 Uploading audio and converting to text...')
+
+      const formData = new FormData()
+      formData.append('audio', audioFile)
+      if (currentSessionId) {
+        formData.append('session_id', currentSessionId.toString())
+      }
+
+      const response = await axios.post(
+        `${API_BASE_URL}/api/ai-agent/audio/upload`,
+        formData,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
+          }
+        }
+      )
+
+      if (response.data.success) {
+        // Update current session ID if it's a new session
+        if (!currentSessionId && response.data.session_id) {
+          setCurrentSessionId(response.data.session_id)
+        }
+
+        // Add user message with audio (content hidden, only audio player shown)
+        const userMessage = {
+          id: response.data.message_id || Date.now(),
+          role: 'user',
+          content: '', // Content hidden when audio file exists
+          timestamp: new Date(),
+          audioFile: response.data.audio_file_path
+        }
+        setMessages(prev => [...prev, userMessage])
+
+        // Send transcribed text to chat (this will get AI response)
+        // Pass skipUserMessage=true to avoid creating duplicate user message
+        if (response.data.text) {
+          await sendMessage(response.data.text, true)
+        } else {
+          setIsLoading(false)
+          setCurrentStatus(null)
+        }
+
+        // Refresh sessions
+        await fetchChatSessions()
+      } else {
+        throw new Error(response.data.error || 'Failed to process audio')
+      }
+    } catch (error) {
+      console.error('Failed to upload audio:', error)
+      const errorMessage = {
+        id: Date.now() + 1,
+        role: 'assistant',
+        content: error.response?.data?.detail || 'Failed to process audio. Please try again.',
+        timestamp: new Date(),
+        error: true
+      }
+      setMessages(prev => [...prev, errorMessage])
+      setIsLoading(false)
+      setCurrentStatus(null)
     }
   }
 
@@ -309,8 +430,10 @@ function AIAgent() {
       const formattedMessages = response.data.map(msg => ({
         id: msg.id,
         role: msg.role,
-        content: msg.content,
-        timestamp: new Date(msg.created_at)
+        // Hide content when audio file exists (only show audio player)
+        content: msg.audio_file_path ? '' : msg.content,
+        timestamp: new Date(msg.created_at),
+        audioFile: msg.audio_file_path
       }))
 
       setMessages(formattedMessages)
@@ -373,32 +496,15 @@ function AIAgent() {
       return
     }
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) {
-      alert('Speech recognition is not supported in your browser. Please use Chrome or Edge.')
-      return
-    }
-
-    if (!recognitionRef.current) {
-      initializeSpeechRecognition()
-    }
-
-    if (!recognitionRef.current) {
-      alert('Failed to initialize speech recognition.')
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert('Audio recording is not supported in your browser. Please use a modern browser.')
       return
     }
 
     if (isRecording) {
-      recognitionRef.current.stop()
-      setIsRecording(false)
+      stopAudioRecording()
     } else {
-      try {
-        recognitionRef.current.start()
-        setIsRecording(true)
-      } catch (error) {
-        console.error('Speech recognition error:', error)
-        setIsRecording(false)
-      }
+      startAudioRecording()
     }
   }
 
@@ -458,18 +564,20 @@ function AIAgent() {
   /**
    * Send message to AI agent with streaming status updates.
    */
-  const sendMessage = async (messageText = null) => {
+  const sendMessage = async (messageText = null, skipUserMessage = false) => {
     const text = messageText || inputMessage.trim()
     if (!text) return
 
-    // Add user message optimistically
-    const userMessage = {
-      id: Date.now(),
-      role: 'user',
-      content: text,
-      timestamp: new Date()
+    // Add user message optimistically (skip if called from audio upload)
+    if (!skipUserMessage) {
+      const userMessage = {
+        id: Date.now(),
+        role: 'user',
+        content: text,
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, userMessage])
     }
-    setMessages(prev => [...prev, userMessage])
     setInputMessage('')
     setIsLoading(true)
     setCurrentStatus(null)
@@ -664,13 +772,25 @@ function AIAgent() {
                        </span>
                     </div>
                   )}
-                   <div className="message-text">
-                     {msg.role === 'assistant' ? (
-                       <FormattedMessage content={msg.content} />
-                     ) : (
-                       msg.content
-                     )}
-                   </div>
+                    {msg.audioFile && (
+                      <div className="audio-player-container">
+                        <div className="audio-label">🎤 Voice Message:</div>
+                        <audio controls className="audio-player">
+                          <source src={`${API_BASE_URL}/${msg.audioFile}`} type="audio/mpeg" />
+                          <source src={`${API_BASE_URL}/${msg.audioFile}`} type="audio/webm" />
+                          Your browser does not support the audio element.
+                        </audio>
+                      </div>
+                    )}
+                    {!msg.audioFile && (
+                      <div className="message-text">
+                        {msg.role === 'assistant' ? (
+                          <FormattedMessage content={msg.content} />
+                        ) : (
+                          msg.content
+                        )}
+                      </div>
+                    )}
                   <div className="message-time">
                     {new Date(msg.timestamp).toLocaleTimeString()}
                   </div>
@@ -717,14 +837,14 @@ function AIAgent() {
                   onChange={handleFileUpload}
                   style={{ display: 'none' }}
                 />
-                <button
-                  type="button"
-                  onClick={toggleVoiceInput}
-                  className={`btn-icon ${isRecording ? 'recording' : ''}`}
-                  title="Voice Input"
-                >
-                  {isRecording ? '🎤' : '🎙️'}
-                </button>
+                 <button
+                   type="button"
+                   onClick={toggleVoiceInput}
+                   className={`btn-icon ${isRecording ? 'recording' : ''}`}
+                   title={isRecording ? 'Stop Recording' : 'Start Voice Recording'}
+                 >
+                   {isRecording ? '⏹️' : '🎙️'}
+                 </button>
               </div>
               <input
                 type="text"

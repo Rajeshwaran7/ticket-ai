@@ -39,6 +39,7 @@ class ChatMessage(Base):
     session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=False, index=True)
     role = Column(String(20), nullable=False)  # 'user' or 'assistant'
     content = Column(Text, nullable=False)
+    audio_file_path = Column(String(500), nullable=True)  # Path to audio file for voice messages
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
     # Relationship to session
@@ -51,6 +52,7 @@ class ChatMessage(Base):
             "session_id": self.session_id,
             "role": self.role,
             "content": self.content,
+            "audio_file_path": self.audio_file_path,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
