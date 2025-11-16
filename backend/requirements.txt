@@ -20,4 +20,5 @@ langchain-experimental>=0.0.50
 langchain-community>=0.0.20
 pandas>=1.5.0
 openai>=1.0.0
+apscheduler>=3.10.4
 

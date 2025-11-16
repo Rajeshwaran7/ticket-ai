@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
-import { getCurrentUser, logout, getToken } from '../services/auth'
+import { getCurrentUser, getToken } from '../services/auth'
 import './Dashboard.css'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -59,11 +59,6 @@ function Dashboard() {
     return () => clearTimeout(timer)
   }, [searchTerm, categoryFilter, statusFilter])
 
-  const handleLogout = async () => {
-    await logout()
-    navigate('/login')
-  }
-
   const getCategoryBadgeClass = (category) => {
     const categoryLower = category?.toLowerCase() ?? ''
     if (categoryLower.includes('billing')) return 'badge-billing'
@@ -112,18 +107,6 @@ function Dashboard() {
 
   return (
     <div className="dashboard">
-      <div className="dashboard-header-main">
-        <div className="header-content">
-          <h1>🎫 Admin Dashboard</h1>
-          <div className="user-info">
-            <span>Welcome, {user?.full_name || user?.username}!</span>
-            <button onClick={handleLogout} className="btn btn-secondary btn-sm">
-              Logout
-            </button>
-          </div>
-        </div>
-      </div>
-
       <div className="dashboard-container">
         <div className="card">
           <div className="dashboard-header">

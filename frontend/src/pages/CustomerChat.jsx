@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
-import { getCurrentUser, logout, getToken } from '../services/auth'
+import { getCurrentUser, getToken } from '../services/auth'
 import './CustomerChat.css'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -96,25 +96,8 @@ function CustomerChat() {
     }
   }
 
-  const handleLogout = async () => {
-    await logout()
-    navigate('/login')
-  }
-
   return (
     <div className="customer-chat">
-      <div className="chat-header">
-        <div className="header-content">
-          <h1>🎫 Support Chat</h1>
-          <div className="user-info">
-            <span>Welcome, {user?.full_name || user?.username}!</span>
-            <button onClick={handleLogout} className="btn btn-secondary btn-sm">
-              Logout
-            </button>
-          </div>
-        </div>
-      </div>
-
       <div className="chat-container">
         <div className="chat-main">
           <div className="welcome-message">

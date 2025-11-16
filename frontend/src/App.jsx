@@ -1,10 +1,12 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { isAuthenticated, isAdmin, isCustomer } from './services/auth'
+import Navbar from './components/Navbar'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import CustomerChat from './pages/CustomerChat'
 import CreateTicket from './pages/CreateTicket'
+import AIAgent from './pages/AIAgent'
 import './App.css'
 
 // Protected Route Component
@@ -33,7 +35,9 @@ function PublicRoute({ children }) {
 
 function App() {
   return (
-    <Routes>
+    <>
+      {isAuthenticated() && <Navbar />}
+      <Routes>
         {/* Public Routes */}
         <Route
           path="/login"
@@ -58,6 +62,14 @@ function App() {
           element={
             <ProtectedRoute>
               <CustomerChat />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/customer/ai-agent"
+          element={
+            <ProtectedRoute>
+              <AIAgent />
             </ProtectedRoute>
           }
         />
@@ -99,6 +111,7 @@ function App() {
         {/* 404 Route */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+    </>
   )
 }
 

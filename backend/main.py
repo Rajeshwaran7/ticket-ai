@@ -1,18 +1,34 @@
 """Main FastAPI application."""
 from dotenv import load_dotenv
 import os
+import atexit
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from routes import tickets, auth
-from models.ticket import init_db
+from models.ticket import init_db, SessionLocal
+from models import chat  # Import to register chat models
+from services.ticket_scheduler import start_scheduler
 
 # Load environment variables
 load_dotenv()
 
 # Initialize database
 init_db()
+
+# Global scheduler variable
+scheduler = None
+
+# Register shutdown handler
+def shutdown_scheduler():
+    """Shutdown scheduler on app exit."""
+    global scheduler
+    if scheduler and scheduler.running:
+        scheduler.shutdown()
+        print("✅ Ticket status scheduler stopped")
+
+atexit.register(shutdown_scheduler)
 
 # Create FastAPI app
 app = FastAPI(
@@ -46,6 +62,25 @@ async def root():
         "message": "AI Powered Ticket Routing System API",
         "version": "1.0.0"
     }
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start scheduler on application startup."""
+    global scheduler
+    try:
+        scheduler = start_scheduler()
+        if scheduler:
+            print("✅ Background scheduler initialized successfully")
+    except Exception as e:
+        print(f"⚠️  Failed to start scheduler: {str(e)}")
+        scheduler = None
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Shutdown scheduler on application shutdown."""
+    shutdown_scheduler()
 
 
 @app.get("/health")

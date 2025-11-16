@@ -26,7 +26,7 @@ class Ticket(Base):
     confidence = Column(String(10), nullable=True)  # Store confidence score from NLI
     screenshot_path = Column(String(500), nullable=True)  # Path to uploaded screenshot
     user_id = Column(Integer, nullable=True, index=True)  # Foreign key to users table
-
+    expected_resolved_datetime = Column(DateTime, nullable=True)  # Expected resolution time
     def to_dict(self) -> dict:
         """Convert ticket to dictionary."""
         return {
@@ -34,6 +34,7 @@ class Ticket(Base):
             "customer": self.customer,
             "message": self.message,
             "category": self.category,
+            "expectedResolvedDatetime": self.expected_resolved_datetime.isoformat() if self.expected_resolved_datetime else None,
             "assignedTeam": self.assigned_team,
             "status": self.status,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
