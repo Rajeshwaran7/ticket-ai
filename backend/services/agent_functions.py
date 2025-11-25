@@ -63,11 +63,31 @@ class AgentFunctions:
             # Try to extract ticket ID
             ticket_id = self._extract_ticket_id(message, tickets)
             if ticket_id:
-                return {
+                # Check if category/team is also mentioned in reopen request
+                category_keywords = {
+                    "billing": ["billing", "payment", "invoice", "charge", "refund", "billing team"],
+                    "technical": ["technical", "tech", "bug", "error", "software", "technical team", "tech team", "techsupport"],
+                    "delivery": ["delivery", "shipping", "order", "package", "delivery team"],
+                    "general": ["general", "other", "general team"]
+                }
+                
+                detected_category = None
+                for category, keywords in category_keywords.items():
+                    if any(kw in message_lower for kw in keywords):
+                        detected_category = category
+                        break
+                
+                result = {
                     "intent": "reopen_ticket",
                     "ticket_id": ticket_id,
                     "confidence": 0.9
                 }
+                
+                if detected_category:
+                    result["category"] = detected_category
+                    result["confidence"] = 0.95  # Higher confidence when category is specified
+                
+                return result
         
         # Detect create ticket intent
         create_keywords = ["create ticket", "new ticket", "open ticket", "submit ticket", 
@@ -224,15 +244,17 @@ class AgentFunctions:
         self,
         ticket_id: int,
         user_id: int,
-        db: Session
+        db: Session,
+        new_category: Optional[str] = None
     ) -> Dict[str, any]:
         """
-        Reopen a closed or resolved ticket.
+        Reopen a closed or resolved ticket, optionally updating category/team.
         
         Args:
             ticket_id: Ticket ID to reopen
             user_id: User ID (for authorization)
             db: Database session
+            new_category: Optional new category to assign (billing, technical, delivery, general)
             
         Returns:
             Dictionary with success status and updated ticket info
@@ -255,17 +277,45 @@ class AgentFunctions:
             }
         
         old_status = ticket.status
+        old_category = ticket.category
+        old_team = ticket.assigned_team
+        
+        # Update status to pending
         ticket.status = "pending"
+        
+        # Update category/team if specified
+        category_updated = False
+        if new_category and new_category.lower() in ["billing", "technical", "delivery", "general"]:
+            new_category_lower = new_category.lower()
+            from services.elsai_service import ElsAIService
+            elsai = ElsAIService()
+            
+            old_category = ticket.category
+            ticket.category = new_category_lower
+            ticket.assigned_team = elsai.get_assigned_team(new_category_lower)
+            category_updated = True
+            
+            # Recalculate ETA when category changes
+            ticket.expected_resolved_datetime = self.calculate_eta(new_category_lower)
         
         db.commit()
         db.refresh(ticket)
+        
+        message = f"Ticket #{ticket.id} has been reopened and is now pending review."
+        if category_updated:
+            message = f"Ticket #{ticket.id} has been reopened, category updated from {old_category} to {ticket.category}, and reassigned to {ticket.assigned_team}. Status reset to pending."
         
         return {
             "success": True,
             "ticket_id": ticket.id,
             "old_status": old_status,
             "new_status": ticket.status,
-            "message": f"Ticket #{ticket.id} has been reopened and is now pending review."
+            "old_category": old_category if category_updated else None,
+            "new_category": ticket.category if category_updated else None,
+            "old_team": old_team if category_updated else None,
+            "new_team": ticket.assigned_team if category_updated else None,
+            "category_updated": category_updated,
+            "message": message
         }
 
     def create_ticket(
@@ -299,6 +349,25 @@ class AgentFunctions:
         # Calculate ETA based on category
         expected_resolved_datetime = self.calculate_eta(category)
         
+        # Format confidence score to fit database column (max 10 chars)
+        confidence_value = classification.get("confidence")
+        if confidence_value is not None:
+            # Convert to string and limit to 10 characters
+            # Format as percentage with 2 decimal places (e.g., "0.80" or "80.00%")
+            if isinstance(confidence_value, (int, float)):
+                # Format as "0.XX" (4 chars) or "XX.XX%" (6 chars)
+                confidence_str = f"{confidence_value:.2f}"
+                if len(confidence_str) > 10:
+                    # If still too long, use percentage format
+                    confidence_str = f"{confidence_value * 100:.1f}%"
+                if len(confidence_str) > 10:
+                    # Last resort: truncate
+                    confidence_str = str(confidence_value)[:10]
+            else:
+                confidence_str = str(confidence_value)[:10]
+        else:
+            confidence_str = None
+        
         # Create ticket in database
         ticket = Ticket(
             customer=customer_name,
@@ -306,7 +375,7 @@ class AgentFunctions:
             category=category,
             assigned_team=assigned_team,
             status="pending",
-            confidence=classification.get("confidence"),
+            confidence=confidence_str,
             user_id=user_id,
             expected_resolved_datetime=expected_resolved_datetime
         )

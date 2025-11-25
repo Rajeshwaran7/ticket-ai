@@ -1,0 +1,300 @@
+/* Enhanced Voice Player Styles */
+.voice-player-container {
+  margin: 0.75rem 0;
+  padding: 1rem;
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.08) 0%, rgba(138, 43, 226, 0.08) 100%);
+  border-radius: 12px;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+}
+
+.voice-player-container:hover {
+  border-color: rgba(0, 212, 255, 0.4);
+  box-shadow: 0 4px 12px rgba(0, 212, 255, 0.15);
+}
+
+.voice-player-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.voice-player-label {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.voice-player-loading {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.loading-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  animation: loading-pulse 1.4s ease-in-out infinite;
+}
+
+.loading-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.loading-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes loading-pulse {
+  0%, 80%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.voice-player-main {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+/* Play/Pause Button */
+.voice-player-play-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent-primary) 0%, #8a2be2 100%);
+  border: none;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
+  flex-shrink: 0;
+}
+
+.voice-player-play-btn:hover:not(:disabled) {
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(0, 212, 255, 0.4);
+}
+
+.voice-player-play-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.voice-player-play-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.voice-player-play-btn.playing {
+  animation: pulse-playing 2s ease-in-out infinite;
+}
+
+@keyframes pulse-playing {
+  0%, 100% {
+    box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
+  }
+  50% {
+    box-shadow: 0 4px 20px rgba(0, 212, 255, 0.5);
+  }
+}
+
+/* Progress Bar Container */
+.voice-player-controls {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.voice-player-progress-container {
+  cursor: pointer;
+  padding: 0.5rem 0;
+  position: relative;
+}
+
+.voice-player-progress-track {
+  width: 100%;
+  height: 6px;
+  background: rgba(0, 212, 255, 0.2);
+  border-radius: 3px;
+  position: relative;
+  overflow: hidden;
+  transition: height 0.2s ease;
+}
+
+.voice-player-progress-container:hover .voice-player-progress-track {
+  height: 8px;
+}
+
+.voice-player-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-primary) 0%, #8a2be2 100%);
+  border-radius: 3px;
+  position: relative;
+  transition: width 0.1s linear;
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+}
+
+.voice-player-progress-handle {
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.voice-player-progress-container:hover .voice-player-progress-handle {
+  opacity: 1;
+}
+
+/* Time Display */
+.voice-player-time {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.time-separator {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+/* Volume Control */
+.voice-player-volume-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.voice-player-volume-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.voice-player-volume-btn:hover {
+  background: rgba(0, 212, 255, 0.1);
+  color: var(--accent-primary);
+}
+
+.voice-player-volume-slider-container {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 0.5rem;
+  padding: 0.75rem;
+  background: var(--bg-card);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  z-index: 10;
+}
+
+.voice-player-volume-slider {
+  width: 80px;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(0, 212, 255, 0.2);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.voice-player-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: var(--accent-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.voice-player-volume-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+}
+
+.voice-player-volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: var(--accent-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.voice-player-volume-slider::-moz-range-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.5);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .voice-player-main {
+    gap: 0.75rem;
+  }
+
+  .voice-player-play-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .voice-player-volume-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .voice-player-time {
+    font-size: 0.7rem;
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .voice-player-container {
+    background: linear-gradient(135deg, rgba(0, 212, 255, 0.12) 0%, rgba(138, 43, 226, 0.12) 100%);
+  }
+
+  .voice-player-progress-handle {
+    background: var(--bg-primary);
+  }
+}
+

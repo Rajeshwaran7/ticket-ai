@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { getCurrentUser, getToken } from '../services/auth'
+import VoicePlayer from '../components/VoicePlayer'
 import './AIAgent.css'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -427,6 +428,9 @@ function AIAgent() {
         }
       )
 
+      console.log('Loaded messages from session:', sessionId, 'Count:', response.data.length)
+      console.log('Messages:', response.data.map(m => ({ id: m.id, role: m.role, content: m.content?.substring(0, 50) })))
+
       const formattedMessages = response.data.map(msg => ({
         id: msg.id,
         role: msg.role,
@@ -527,37 +531,124 @@ function AIAgent() {
 
     try {
       const token = getToken()
-      const formData = new FormData()
-      formData.append('screenshot', file)
-      formData.append('message', 'Document uploaded for AI analysis')
-      formData.append('customer', user?.full_name || user?.username || 'Customer')
-
-      // Upload document
-      const response = await axios.post(
-        `${API_BASE_URL}/api/ticket/chat`,
-        formData,
-        {
-          headers: { 'Authorization': `Bearer ${token}` }
-        }
-      )
-
-      const docInfo = {
-        id: response.data.id,
-        name: file.name,
-        url: response.data.screenshot_path 
-          ? `${API_BASE_URL}${response.data.screenshot_path}` 
-          : URL.createObjectURL(file),
-        ticketId: response.data.id
+      if (!token) {
+        navigate('/login')
+        return
       }
 
-      setUploadedDocs([...uploadedDocs, docInfo])
+      const formData = new FormData()
+      formData.append('screenshot', file)
+      formData.append('message', `I uploaded an image: ${file.name}`)
+      formData.append('customer', user?.full_name || user?.username || 'Customer')
+      
+      // Add session_id if available to save to conversation
+      if (currentSessionId) {
+        formData.append('session_id', currentSessionId.toString())
+      }
 
-      // Ask AI about the document
-      const docMessage = `I just uploaded a document (${file.name}). Can you analyze it and tell me what information is in it?`
-      await sendMessage(docMessage)
+      setIsLoading(true)
+      setCurrentStatus(null)
+
+      // Add user message optimistically
+      const userMessage = {
+        id: Date.now(),
+        role: 'user',
+        content: `📎 I uploaded an image: ${file.name}`,
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, userMessage])
+
+      // Use streaming endpoint
+      const response = await fetch(`${API_BASE_URL}/api/ticket/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let ticketData = null
+      let sessionId = null
+      let messageId = null
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              
+              if (data.type === 'status') {
+                setCurrentStatus(data.message)
+                // Scroll to show status update
+                setTimeout(() => {
+                  scrollToBottom()
+                }, 50)
+              } else if (data.type === 'complete') {
+                ticketData = data.ticket
+                sessionId = data.session_id
+                messageId = data.message_id
+                
+                // Update uploaded docs
+                const docInfo = {
+                  id: ticketData.id,
+                  name: file.name,
+                  url: ticketData.screenshot_path 
+                    ? `${API_BASE_URL}${ticketData.screenshot_path}` 
+                    : URL.createObjectURL(file),
+                  ticketId: ticketData.id
+                }
+                setUploadedDocs(prev => [...prev, docInfo])
+                
+                setCurrentStatus(null)
+              } else if (data.type === 'error') {
+                throw new Error(data.message || 'Upload failed')
+              }
+            } catch (parseError) {
+              console.error('Error parsing SSE data:', parseError)
+            }
+          }
+        }
+      }
+
+      // If message was saved to conversation, update session and reload messages
+      if (sessionId && messageId) {
+        // Update current session ID if it was created
+        if (!currentSessionId && sessionId) {
+          setCurrentSessionId(sessionId)
+          await fetchChatSessions()
+        } else if (currentSessionId !== sessionId) {
+          setCurrentSessionId(sessionId)
+        }
+        
+        // Reload messages to get both user upload message and AI response
+        await loadSessionMessages(sessionId)
+        
+        // Scroll to bottom to show the new messages
+        setTimeout(() => {
+          scrollToBottom()
+        }, 300)
+      }
+
+      setIsLoading(false)
     } catch (error) {
       console.error('Failed to upload document:', error)
       alert('Failed to upload document. Please try again.')
+      setIsLoading(false)
+      setCurrentStatus(null)
     }
   }
 
@@ -773,14 +864,10 @@ function AIAgent() {
                     </div>
                   )}
                     {msg.audioFile && (
-                      <div className="audio-player-container">
-                        <div className="audio-label">🎤 Voice Message:</div>
-                        <audio controls className="audio-player">
-                          <source src={`${API_BASE_URL}/${msg.audioFile}`} type="audio/mpeg" />
-                          <source src={`${API_BASE_URL}/${msg.audioFile}`} type="audio/webm" />
-                          Your browser does not support the audio element.
-                        </audio>
-                      </div>
+                      <VoicePlayer
+                        audioUrl={`${API_BASE_URL}/${msg.audioFile}`}
+                        label="🎤 Voice Message"
+                      />
                     )}
                     {!msg.audioFile && (
                       <div className="message-text">

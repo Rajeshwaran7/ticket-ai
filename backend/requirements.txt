@@ -1,7 +1,9 @@
-# Install elsai-nli from custom index first
+# Install elsai packages from custom index first
 # pip install --index-url https://elsai-core-package.optisolbusiness.com/root/elsai-nli/ elsai-nli==0.1.0
+# pip install --index-url https://elsai-core-package.optisolbusiness.com/root/elsai-model/ elsai-model==1.2.1
 
 fastapi==0.104.1
+elsai-model==1.2.1
 uvicorn[standard]==0.24.0
 sqlalchemy==2.0.23
 pymysql==1.1.0
@@ -24,4 +26,9 @@ apscheduler>=3.10.4
 SpeechRecognition>=3.10.0
 pydub>=0.25.1
 gtts>=2.5.0
+PyPDF2>=3.0.0
+python-docx>=1.1.0
+faiss-cpu>=1.7.4
+sentence-transformers>=2.2.0
+requests>=2.31.0
 

@@ -7,12 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-try:
-    from openai import OpenAI
-    openai_client_available = True
-except ImportError:
-    openai_client_available = False
-    OpenAI = None
+from services.elsai_connection import ElsaiConnection
 
 
 class AIChatService:
@@ -20,13 +15,7 @@ class AIChatService:
 
     def __init__(self):
         """Initialize AI chat service."""
-        self.model_name = os.getenv("ELSAI_MODEL", "gpt-5-nano")
-        self.openai_client = None
-        
-        if openai_client_available:
-            api_key = os.getenv("OPENAI_API_KEY")
-            if api_key:
-                self.openai_client = OpenAI(api_key=api_key)
+        self.elsai_connection = ElsaiConnection()
 
     def format_ticket_context(self, tickets: List[Dict]) -> str:
         """
@@ -73,7 +62,7 @@ class AIChatService:
         Returns:
             Dictionary with detected intent and parameters
         """
-        if not self.openai_client:
+        if not self.elsai_connection.is_available():
             return {"intent": "chat", "confidence": 1.0}
         
         try:
@@ -100,24 +89,13 @@ Respond ONLY with a JSON object in this exact format:
 If intent is "create_ticket", extract the ticket message/content from the user's query and include it in "ticket_message".
 If intent is "chat", only include intent and confidence. Do not include any other text."""
 
-            models_using_responses_api = ["gpt-5-nano"]
-            use_responses_api = any(model in self.model_name.lower() for model in models_using_responses_api)
+            # Use ElsaiConnection invoke method
+            messages = [{"role": "user", "content": detection_prompt}]
+            response_text = self.elsai_connection.invoke(messages=messages)
             
-            if use_responses_api:
-                response = self.openai_client.responses.create(
-                    model=self.model_name,
-                    input=detection_prompt,
-                    store=True
-                )
-                response_text = response.output_text
-            else:
-                response = self.openai_client.chat.completions.create(
-                    model=self.model_name,
-                    messages=[{"role": "user", "content": detection_prompt}],
-                    temperature=0.3,
-                    max_tokens=200
-                )
-                response_text = response.choices[0].message.content
+            # Ensure response_text is a string for regex matching
+            if not isinstance(response_text, str):
+                response_text = str(response_text)
             
             # Extract JSON from response
             json_match = re.search(r'\{[^}]+\}', response_text, re.DOTALL)
@@ -136,7 +114,9 @@ If intent is "chat", only include intent and confidence. Do not include any othe
         user_query: str,
         ticket_context: str,
         conversation_history: Optional[List[Dict[str, str]]] = None,
-        action_result: Optional[str] = None
+        action_result: Optional[str] = None,
+        knowledge_base_context: Optional[str] = None,
+        document_analysis_context: Optional[str] = None
     ) -> Dict[str, str]:
         """
         Generate AI chat response based on user query and ticket context.
@@ -146,28 +126,35 @@ If intent is "chat", only include intent and confidence. Do not include any othe
             ticket_context: Formatted context about customer's tickets
             conversation_history: Previous conversation messages
             action_result: Result message from executed action (if any)
+            knowledge_base_context: Relevant knowledge base information
+            document_analysis_context: Image/document analysis results from uploaded files
             
         Returns:
             Dictionary with response text and status
         """
-        if not self.openai_client:
+        if not self.elsai_connection.is_available():
             return {
-                "response": "AI chat service is not available. Please check API configuration.",
-                "error": "OpenAI client not initialized"
+                "response": "AI chat service is not available. Please check Azure OpenAI configuration.",
+                "error": "Elsai Azure OpenAI Connector not initialized"
             }
         
         try:
-            # Build system prompt with ticket context
+            # Build system prompt with ticket context and knowledge base
             action_context = f"\n\nAction Result: {action_result}\n" if action_result else ""
+            kb_context = f"\n\nRelevant Knowledge Base Information:\n{knowledge_base_context}\n" if knowledge_base_context else ""
+            doc_analysis = f"\n\nDocument/Image Analysis Results:\n{document_analysis_context}\n" if document_analysis_context else ""
+            
             system_prompt = (
                 "You are a helpful AI assistant for a ticket support system. "
                 "You help customers understand their tickets and answer questions about them. "
                 "You can also help them update ticket categories or reopen tickets. "
                 "Be friendly, concise, and helpful. "
-                f"\n\nCustomer's Ticket Information:\n{ticket_context}{action_context}\n\n"
-                "Answer the customer's questions based on their ticket information. "
+                f"\n\nCustomer's Ticket Information:\n{ticket_context}{action_context}{kb_context}{doc_analysis}\n\n"
+                "Answer the customer's questions based on their ticket information and any relevant knowledge base documents. "
                 "If an action was just performed, acknowledge it naturally in your response. "
-                "If they ask about something not in their tickets, politely let them know."
+                "Use information from the knowledge base when relevant to answer questions. "
+                "If they ask about a document or image they uploaded, use the Document/Image Analysis Results to provide detailed information about what's in the document/image. "
+                "If they ask about something not in their tickets or knowledge base, politely let them know."
             )
             
             # Build messages array
@@ -184,39 +171,17 @@ If intent is "chat", only include intent and confidence. Do not include any othe
             # Add current user query
             messages.append({"role": "user", "content": user_query})
             
-            # Check if using responses API (gpt-5-nano) or chat completions
-            models_using_responses_api = ["gpt-5-nano"]
-            use_responses_api = any(model in self.model_name.lower() for model in models_using_responses_api)
+            # Use ElsaiConnection invoke method
+            response_text = self.elsai_connection.invoke(messages=messages)
             
-            if use_responses_api:
-                # Use responses API
-                combined_prompt = "\n".join([
-                    msg["content"] for msg in messages
-                ])
-                
-                response = self.openai_client.responses.create(
-                    model=self.model_name,
-                    input=combined_prompt,
-                    store=True
-                )
-                
-                return {
-                    "response": response.output_text,
-                    "status": "success"
-                }
-            else:
-                # Use chat completions API
-                response = self.openai_client.chat.completions.create(
-                    model=self.model_name,
-                    messages=messages,
-                    temperature=0.7,
-                    max_tokens=500
-                )
-                
-                return {
-                    "response": response.choices[0].message.content,
-                    "status": "success"
-                }
+            # Ensure response_text is a string
+            if not isinstance(response_text, str):
+                response_text = str(response_text)
+            
+            return {
+                "response": response_text,
+                "status": "success"
+            }
                 
         except Exception as e:
             error_msg = str(e)
