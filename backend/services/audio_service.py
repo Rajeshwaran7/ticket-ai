@@ -5,6 +5,10 @@ from pathlib import Path
 from typing import Dict, Optional
 import subprocess
 import sys
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 try:
     import speech_recognition as sr
@@ -13,6 +17,14 @@ except ImportError:
     SPEECH_RECOGNITION_AVAILABLE = False
     print("⚠️  speech_recognition not installed. Install with: pip install SpeechRecognition")
     print("   For offline STT, also install: pip install vosk")
+
+try:
+    from elsai_stt.stt.azure_openai import AzureOpenAIWhisper
+    AZURE_WHISPER_AVAILABLE = True
+except ImportError:
+    AZURE_WHISPER_AVAILABLE = False
+    print("⚠️  elsai_stt not installed. Azure OpenAI Whisper fallback will not be available.")
+    print("   Install with: pip install elsai-stt")
 
 
 def find_ffmpeg() -> Optional[str]:
@@ -62,16 +74,40 @@ class AudioService:
         """
         self.upload_dir = upload_dir
         self.recognizer = None
+        self.whisper = None
         
         # Create upload directory if it doesn't exist
         os.makedirs(upload_dir, exist_ok=True)
         
-        # Initialize speech recognizer
+        # Initialize speech recognizer (Google STT)
         if SPEECH_RECOGNITION_AVAILABLE:
             try:
                 self.recognizer = sr.Recognizer()
             except Exception as e:
                 print(f"Warning: Could not initialize speech recognizer: {e}")
+        
+        # Initialize Azure OpenAI Whisper (fallback STT)
+        if AZURE_WHISPER_AVAILABLE:
+            try:
+                # Get configuration from environment variables
+                api_version = os.getenv("AZURE_WHISPER_API_VERSION") or os.getenv("OPENAI_API_VERSION")
+                endpoint = os.getenv("AZURE_WHISPER_ENDPOINT") or os.getenv("AZURE_OPENAI_ENDPOINT")
+                api_key = os.getenv("AZURE_WHISPER_API_KEY") or os.getenv("AZURE_OPENAI_API_KEY")
+                deployment_id = os.getenv("AZURE_WHISPER_DEPLOYMENT_ID") or os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+                
+                # Only initialize if we have the required configuration
+                if endpoint and api_key and deployment_id:
+                    self.whisper = AzureOpenAIWhisper(
+                        api_version=api_version,
+                        endpoint=endpoint,
+                        api_key=api_key,
+                        deployment_id=deployment_id
+                    )
+                    print("✅ Azure OpenAI Whisper initialized as STT fallback")
+                else:
+                    print("⚠️  Azure OpenAI Whisper configuration incomplete. Set AZURE_WHISPER_* or AZURE_OPENAI_* environment variables.")
+            except Exception as e:
+                print(f"Warning: Could not initialize Azure OpenAI Whisper: {e}")
 
     def save_audio_file(self, file_content: bytes, filename: str, session_id: Optional[int] = None) -> Optional[str]:
         """
@@ -191,7 +227,54 @@ class AudioService:
 
     def convert_speech_to_text(self, audio_file_path: str) -> Dict[str, any]:
         """
-        Convert speech to text using local STT engine (Google STT - free, no API key needed).
+        Convert speech to text using Google STT (primary) with Azure OpenAI Whisper as fallback.
+        
+        Args:
+            audio_file_path: Path to audio file
+            
+        Returns:
+            Dictionary with transcribed text and status
+        """
+        # Check if file exists
+        if not os.path.exists(audio_file_path):
+            return {
+                "success": False,
+                "error": f"Audio file not found: {audio_file_path}"
+            }
+        
+        # Try Google STT first (primary method)
+        if self.recognizer:
+            google_result = self._try_google_stt(audio_file_path)
+            if google_result.get("success"):
+                return google_result
+            print(f"⚠️  Google STT failed: {google_result.get('error', 'Unknown error')}. Trying Azure OpenAI Whisper fallback...")
+        
+        # Fallback to Azure OpenAI Whisper
+        if self.whisper:
+            whisper_result = self._try_azure_whisper_stt(audio_file_path)
+            if whisper_result.get("success"):
+                return whisper_result
+            print(f"⚠️  Azure OpenAI Whisper failed: {whisper_result.get('error', 'Unknown error')}")
+        
+        # Both methods failed
+        error_messages = []
+        if not self.recognizer and not self.whisper:
+            error_messages.append("No STT engines available. Install SpeechRecognition or elsai-stt.")
+        elif not self.recognizer:
+            error_messages.append("Google STT not available.")
+        elif not self.whisper:
+            error_messages.append("Azure OpenAI Whisper not configured.")
+        else:
+            error_messages.append("Both STT methods failed.")
+        
+        return {
+            "success": False,
+            "error": " ".join(error_messages)
+        }
+    
+    def _try_google_stt(self, audio_file_path: str) -> Dict[str, any]:
+        """
+        Try to transcribe audio using Google Speech Recognition.
         
         Args:
             audio_file_path: Path to audio file
@@ -202,17 +285,10 @@ class AudioService:
         if not self.recognizer:
             return {
                 "success": False,
-                "error": "Speech recognition not available. Please install SpeechRecognition library."
+                "error": "Google STT recognizer not initialized"
             }
         
         try:
-            # Check if file exists
-            if not os.path.exists(audio_file_path):
-                return {
-                    "success": False,
-                    "error": f"Audio file not found: {audio_file_path}"
-                }
-            
             # Try to convert to WAV if needed (speech_recognition works better with WAV)
             wav_file_path = self._convert_to_wav(audio_file_path)
             
@@ -222,9 +298,6 @@ class AudioService:
                 wav_file_path = audio_file_path
             
             # Try to load audio file
-            audio_data = None
-            wav_was_created = False
-            
             try:
                 with sr.AudioFile(wav_file_path) as source:
                     # Adjust for ambient noise
@@ -234,7 +307,7 @@ class AudioService:
                 # If AudioFile fails, the format might not be supported
                 return {
                     "success": False,
-                    "error": f"Audio format not supported for speech recognition. Please install ffmpeg for format conversion. Error: {str(e)}"
+                    "error": f"Audio format not supported: {str(e)}"
                 }
             
             # Use Google Speech Recognition (free, online, no API key needed)
@@ -261,7 +334,8 @@ class AudioService:
                 return {
                     "success": True,
                     "text": text.strip(),
-                    "confidence": None  # Google STT doesn't provide confidence in free version
+                    "confidence": None,  # Google STT doesn't provide confidence in free version
+                    "method": "google"
                 }
             else:
                 return {
@@ -271,11 +345,61 @@ class AudioService:
                 
         except Exception as e:
             import traceback
-            print(f"❌ Speech recognition error: {e}")
+            print(f"❌ Google STT error: {e}")
             traceback.print_exc()
             return {
                 "success": False,
-                "error": f"Speech recognition error: {str(e)}"
+                "error": f"Google STT error: {str(e)}"
+            }
+    
+    def _try_azure_whisper_stt(self, audio_file_path: str) -> Dict[str, any]:
+        """
+        Try to transcribe audio using Azure OpenAI Whisper (fallback method).
+        
+        Args:
+            audio_file_path: Path to audio file
+            
+        Returns:
+            Dictionary with transcribed text and status
+        """
+        if not self.whisper:
+            return {
+                "success": False,
+                "error": "Azure OpenAI Whisper not initialized"
+            }
+        
+        try:
+            # Azure OpenAI Whisper can handle various audio formats directly
+            result = self.whisper.transcribe_audio(file_path=audio_file_path)
+            
+            # Extract text from result (format may vary, handle both dict and string)
+            if isinstance(result, dict):
+                text = result.get("text") or result.get("transcription")
+            elif isinstance(result, str):
+                text = result
+            else:
+                text = str(result)
+            
+            if text and text.strip():
+                return {
+                    "success": True,
+                    "text": text.strip(),
+                    "confidence": result.get("confidence") if isinstance(result, dict) else None,
+                    "method": "azure_whisper"
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "Azure OpenAI Whisper returned empty transcription"
+                }
+                
+        except Exception as e:
+            import traceback
+            print(f"❌ Azure OpenAI Whisper error: {e}")
+            traceback.print_exc()
+            return {
+                "success": False,
+                "error": f"Azure OpenAI Whisper error: {str(e)}"
             }
 
     def _convert_to_wav(self, audio_file_path: str) -> Optional[str]:
